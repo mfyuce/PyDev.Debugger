@@ -378,3 +378,48 @@ def check_dont_notify_on_gevent_loaded():
 def test_gevent_notify():
     _check_in_separate_process('check_notify_on_gevent_loaded', update_env={'GEVENT_SUPPORT': ''})
     _check_in_separate_process('check_dont_notify_on_gevent_loaded', update_env={'GEVENT_SUPPORT': 'True'})
+
+
+def check_funcname_lines(filename, expected_checks):
+    from _pydevd_bundle.pydevd_utils import get_funcname_for_line
+    checks = 0
+    with open(filename, 'r') as stream:
+        for i, line in enumerate(stream.readlines()):
+            if 'line in' in line:
+                expected_func_name = line[line.index('# line in ') + 10:].strip()
+                print(i, expected_func_name)
+                assert get_funcname_for_line(i, filename) == expected_func_name
+                checks += 1
+
+    assert checks == expected_checks
+
+
+def test_get_line_function_name(pyfile):
+
+    @pyfile
+    def func2():
+
+        def method2(): b = 20  # line in method2
+
+    check_funcname_lines(func2, 1)
+
+    @pyfile
+    def func():
+
+        def method1():
+            a = 10  # line in method1
+
+        def method2(): b = 20  # line in method2
+
+        def method3(): c = 20; d = 30  # line in method3
+
+        def method4():  # line in method4
+            e = \
+                10  # line in method4
+
+            def inner():
+                f = 10  # line in inner
+
+            g = 10
+
+    check_funcname_lines(func, 6)

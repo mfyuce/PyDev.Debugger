@@ -2,6 +2,9 @@ from __future__ import nested_scopes
 import traceback
 import warnings
 from _pydev_bundle import pydev_log
+import linecache
+import ast
+from collections import deque
 
 try:
     from urllib import quote
@@ -295,4 +298,75 @@ def isinstance_checked(obj, cls):
         return isinstance(obj, cls)
     except:
         return False
+
+
+class CtxInfo(object):
+
+    def __init__(self, node):
+        self.node = node
+        self.last_node = None
+
+    def __str__(self):
+        return 'CtxInfo(%s - %s - %s)' % (self.node.__class__.__name__, self.node.name, self.node.lineno)
+
+
+class ComputeLinesVisitor(ast.NodeVisitor):
+
+    def __init__(self):
+        self.context_infos = []
+        self._stack = deque()
+
+    def visit_FunctionDef(self, node):
+        ctx_info = CtxInfo(node)
+        self.context_infos.append(ctx_info)
+        self._stack.append(ctx_info)
+        self.generic_visit(node)
+        self._stack.pop()
+
+    def generic_visit(self, node):
+        if self._stack:
+            ctx = self._stack[-1]
+            ctx.last_node = node
+        ast.NodeVisitor.generic_visit(self, node)
+
+
+def get_funcname_for_line(lineno, filename):
+    lineno += 1  # i.e.: ast gives 1-based lines and this api expects a 0-based line.
+    lines = linecache.getlines(filename)
+    source = ''.join(lines)
+    if not source:
+        return None
+
+    tree = ast.parse(source)
+    visitor = ComputeLinesVisitor()
+    visitor.visit(tree)
+    matches = []
+    # print(repr(source))
+    # print('\n'.join(str(x) for x in visitor.context_infos))
+    for context in visitor.context_infos:
+        start_line = context.node.lineno
+        if context.last_node is not None:
+            end_line = context.last_node.lineno
+        else:
+            end_line = start_line
+
+        if lineno >= start_line and lineno <= end_line:
+            matches.append((context, end_line - start_line))
+
+    if not matches:
+        return None
+    if len(matches) == 1:
+        match = matches[0]
+        context, _ = match
+        return context.node.name
+    else:
+        min_found = 99999999
+        ctx_found = None
+        for context, n_lines in matches:
+            if n_lines < min_found:
+                min_found = n_lines
+                ctx_found = context
+
+        return ctx_found.node.name
+
 
